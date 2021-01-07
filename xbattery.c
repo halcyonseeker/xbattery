@@ -42,7 +42,7 @@ int x11_fd;
 /* Function signatures */
 void die(char *what, char *happened);
 void free_battery(void);
-void display(int width, int height);
+void display(void);
 void init_x(void);
 void init_batteries(void);
 unsigned long color_for_percentage(int percent);
@@ -157,7 +157,7 @@ parse_acpi_to_struct(void)
  * The arguments are the width and height of the window.
  */
 void
-display(int width, int height)
+display(void)
 {
     int percent = battery->percent;
     unsigned long color = color_for_percentage(percent);
@@ -166,22 +166,17 @@ display(int width, int height)
     XWindowAttributes *attrs = malloc(sizeof(XWindowAttributes));
     XGetWindowAttributes(dis, win, attrs);
 
-    if (width <= 0)
-        width = attrs->width;
-    if (height <= 0)
-        height = attrs->height;
-
-    int percentage_width = (width / 100.0) * percent;
+    int percentage_width = (attrs->width / 100.0) * percent;
 
     /* Add colors to the window */
     XClearWindow(dis, win);
     XSetForeground(dis, gc, color);
-    XDrawRectangle(dis, win, gc, 0, 0, width, height);
-    XFillRectangle(dis, win, gc, 0, 0, percentage_width, height);
+    XDrawRectangle(dis, win, gc, 0, 0, attrs->width, attrs->height);
+    XFillRectangle(dis, win, gc, 0, 0, percentage_width, attrs->height);
     XSetForeground(dis, gc, RGB(10, 10, 10));
 
     int x = 5;
-    int y = (height / 2) + 10;
+    int y = (attrs->height / 2) + 10;
 
     /* Add text to the window */
     if (strcmp(battery->status, "Charging") == 0) {
@@ -276,7 +271,6 @@ main(int argc, char *argv[])
 {
     struct timeval tv;
     fd_set in_fds;
-    XEvent event;
 
     /* Start the window */
     init_x();
@@ -298,24 +292,17 @@ main(int argc, char *argv[])
         tv.tv_usec = 0;
         tv.tv_sec = 10;
 
-        /* Get an X event */
-        XCheckWindowEvent(dis, win, ResizeRedirectMask, &event);
-
         /* respond to the timer or a resize event */
         if (select(x11_fd + 1, &in_fds, 0, 0, &tv)) {
             /* Handle the event here */
             printf("handle event\n");
-            display(0, 0);
+            display();
         } else {
             /* Handle timer here */
             parse_acpi_to_struct();
             printf("%s: %s - %i, %s\n", battery->name, battery->status,
                     battery->percent, battery->remaining);
-            display(0, 0);
-        }
-        /* Handle XEvents and flush the input */
-        while (XPending(dis)) {
-            XNextEvent(dis, &event);
+            display();
         }
     }
 
