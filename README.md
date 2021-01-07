@@ -19,9 +19,9 @@ Run `make install` as root to copy the binary to `/usr/local/bin`.
 
 Known Bugs
 ---
-* Valgrind says there's a memory leak.
 * The window is white for a few seconds after startup.
-* The window is *really* lazy about refreshing.
+* The text takes a 1-10 seconds to change when plugging/unplugging the 
+  AC adaptor
 
 Roadmap
 ---

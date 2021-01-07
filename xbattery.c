@@ -94,7 +94,7 @@ color_for_percentage(int p)
 
 /**
  * For ACPI systems, read data into the global battery struct.
- * This is called every few seconds by display()
+ * This is called every few seconds by the main loop in main().
  */
 void
 parse_acpi_to_struct(void)
@@ -154,7 +154,6 @@ parse_acpi_to_struct(void)
 
 /**
  * Run a loop to query system info and update the X window
- * The arguments are the width and height of the window.
  */
 void
 display(void)
@@ -213,8 +212,9 @@ void init_x(void)
     win = XCreateSimpleWindow(dis, DefaultRootWindow(dis), 0, 0, width, height, 5,
                               black, white);
     XSetStandardProperties(dis, win, "XBattery", "XBattery", None, NULL, 0, NULL);
-
-    //XSelectInput(dis, win, ExposureMask | ResizeRedirectMask);
+    /* Adding StructureNotifyMask just fixed all the resize issues 
+     * https://www.lemoda.net/c/xlib-resize/
+     */
     XSelectInput(dis, win, ExposureMask | StructureNotifyMask);
     gc = XCreateGC(dis, win, 0, 0);
     XSetBackground(dis, gc, white);
@@ -284,6 +284,7 @@ main(int argc, char *argv[])
 
     /* Main loop reads battery information and draws the X window */
     for (;;) {
+        
         /* Create a file description set containing x11_fd */
         FD_ZERO(&in_fds);
         FD_SET(x11_fd, &in_fds);
@@ -295,7 +296,6 @@ main(int argc, char *argv[])
         /* respond to the timer or a resize event */
         if (select(x11_fd + 1, &in_fds, 0, 0, &tv)) {
             /* Handle the event here */
-            printf("handle event\n");
             display();
         } else {
             /* Handle timer here */

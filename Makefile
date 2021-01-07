@@ -12,5 +12,4 @@ clean:
 	rm -f ./xbattery
 
 install:
-	pkill -x xbattery
 	cp ./xbattery /usr/local/bin/
