@@ -8,7 +8,6 @@
 #define _GNU_SOURCE             /* asprintf() */
 
 #include <stdio.h>
-#include <unistd.h>
 #include <dirent.h>
 #include <stdlib.h>
 #include <string.h>
@@ -43,8 +42,9 @@ int x11_fd;
 /* Function signatures */
 void die(char *what, char *happened);
 void free_battery(void);
-void display();
-void init_x();
+void display(int width, int height);
+void init_x(void);
+void init_batteries(void);
 unsigned long color_for_percentage(int percent);
 void parse_acpi_to_struct(void);
 int main(int argc, char *argv[]);
@@ -154,59 +154,60 @@ parse_acpi_to_struct(void)
 
 /**
  * Run a loop to query system info and update the X window
+ * The arguments are the width and height of the window.
  */
 void
-display(void)
+display(int width, int height)
 {
-    while (1) {
-        parse_acpi_to_struct();
-        printf("%s: %s - %i, %s\n", battery->name, battery->status,
-               battery->percent, battery->remaining);
+    int percent = battery->percent;
+    unsigned long color = color_for_percentage(percent);
 
-        int percent = battery->percent;
-        unsigned long color = color_for_percentage(percent);
+    /* get current window attributes */
+    XWindowAttributes *attrs = malloc(sizeof(XWindowAttributes));
+    XGetWindowAttributes(dis, win, attrs);
 
-        /* get current window attributes */
-        XWindowAttributes *attrs = malloc(sizeof(XWindowAttributes));
-        XGetWindowAttributes(dis, win, attrs);
+    if (width <= 0)
+        width = attrs->width;
+    if (height <= 0)
+        height = attrs->height;
 
-        int percentage_width = (attrs->width / 100.0) * percent;
+    int percentage_width = (width / 100.0) * percent;
 
-        XSetForeground(dis, gc, color);
-        XDrawRectangle(dis, win, gc, 0, 0, attrs->width, attrs->height);
-        XFillRectangle(dis, win, gc, 0, 0, percentage_width, attrs->height);
-        XSetForeground(dis, gc, RGB(10, 10, 10));
+    /* Add colors to the window */
+    XClearWindow(dis, win);
+    XSetForeground(dis, gc, color);
+    XDrawRectangle(dis, win, gc, 0, 0, width, height);
+    XFillRectangle(dis, win, gc, 0, 0, percentage_width, height);
+    XSetForeground(dis, gc, RGB(10, 10, 10));
 
-        int x = 5;
-        int y = (attrs->height / 2) + 10;
+    int x = 5;
+    int y = (height / 2) + 10;
 
-        if (strcmp(battery->status, "Charging") == 0) {
-            char *icon = "🔌: ";
-            XftDrawStringUtf8(draw, &xftc, emoji_font, x, y, (XftChar8*)icon,
-                              strlen(icon));
-            x += 35;
-            XftDrawStringUtf8(draw, &xftc, text_font, x, y,
-                              (XftChar8*)battery->remaining,
-                              strlen(battery->remaining));
-        } else if (strcmp(battery->status, "Discharging") == 0) {
-            char *icon = "🔋: ";
-            XftDrawStringUtf8(draw, &xftc, emoji_font, x, y, (XftChar8*)icon,
-                              strlen(icon));
-            x += 35;
-            XftDrawStringUtf8(draw, &xftc, text_font, x, y,
-                              (XftChar8*)battery->remaining,
-                              strlen(battery->remaining));
-        }
-        free(attrs);
-
-        sleep(5);
+    /* Add text to the window */
+    if (strcmp(battery->status, "Charging") == 0) {
+        char *icon = "🔌: ";
+        XftDrawStringUtf8(draw, &xftc, emoji_font, x, y, (XftChar8*)icon,
+                        strlen(icon));
+        x += 35;
+        XftDrawStringUtf8(draw, &xftc, text_font, x, y,
+                        (XftChar8*)battery->remaining,
+                        strlen(battery->remaining));
+    } else if (strcmp(battery->status, "Discharging") == 0) {
+        char *icon = "🔋: ";
+        XftDrawStringUtf8(draw, &xftc, emoji_font, x, y, (XftChar8*)icon,
+                        strlen(icon));
+        x += 35;
+        XftDrawStringUtf8(draw, &xftc, text_font, x, y,
+                        (XftChar8*)battery->remaining,
+                        strlen(battery->remaining));
     }
+    free(attrs);
 }
 
 /**
  * X11 init
  */
-void init_x()
+void init_x(void)
 {
     unsigned long black, white;
     int width = 200, height = 70;
@@ -218,7 +219,8 @@ void init_x()
                               black, white);
     XSetStandardProperties(dis, win, "XBattery", "XBattery", None, NULL, 0, NULL);
 
-    XSelectInput(dis, win, ExposureMask | ButtonPressMask | KeyPressMask);
+    //XSelectInput(dis, win, ExposureMask | ResizeRedirectMask);
+    XSelectInput(dis, win, ExposureMask | StructureNotifyMask);
     gc = XCreateGC(dis, win, 0, 0);
     XSetBackground(dis, gc, white);
     XSetForeground(dis, gc, black);
@@ -237,22 +239,22 @@ void init_x()
                        DefaultColormap(dis, DefaultScreen(dis)), &color, &xftc);
 }
 
-int
-main(int argc, char *argv[])
+/**
+ * Setup the batteries but don't read them yet
+ */
+void
+init_batteries(void)
 {
     int bats = 0;
-
-    /* Variables used for ACPI */
     DIR *acpi_dir;
     struct dirent *dirp;
 
-    init_x();
-    x11_fd = ConnectionNumber(dis);
-
     if ((acpi_dir = opendir("/sys/class/power_supply")) != NULL) {
-        /* Make sure there are batteries attached. This is not the best
+        /* 
+         * Make sure there are batteries attached. This is not the best
          * way to do this, but it will be useful later when multiple
-         * batteries are supported */
+         * batteries are supported 
+         */
         while ((dirp = readdir(acpi_dir)) != NULL)
             if (strncmp(dirp->d_name, "BAT", 3) == 0)
                 bats++;
@@ -262,12 +264,59 @@ main(int argc, char *argv[])
         battery = calloc(1, sizeof(Battery));
         if (battery == NULL)
             die("calloc", "I couldn't allocate core for the battery");
-
-        display();
                 
         closedir(acpi_dir);
     } else {
         die("opendir", "I failed to open /sys/class/power_supply");
+    }
+}
+
+int
+main(int argc, char *argv[])
+{
+    struct timeval tv;
+    fd_set in_fds;
+    XEvent event;
+
+    /* Start the window */
+    init_x();
+
+    /* Get a file descriptor for the window */
+    x11_fd = ConnectionNumber(dis);
+
+    /* Set up the battery info struct */
+    init_batteries();
+    parse_acpi_to_struct();
+
+    /* Main loop reads battery information and draws the X window */
+    for (;;) {
+        /* Create a file description set containing x11_fd */
+        FD_ZERO(&in_fds);
+        FD_SET(x11_fd, &in_fds);
+
+        /* Set a timer to refresh every 10 seconds */
+        tv.tv_usec = 0;
+        tv.tv_sec = 10;
+
+        /* Get an X event */
+        XCheckWindowEvent(dis, win, ResizeRedirectMask, &event);
+
+        /* respond to the timer or a resize event */
+        if (select(x11_fd + 1, &in_fds, 0, 0, &tv)) {
+            /* Handle the event here */
+            printf("handle event\n");
+            display(0, 0);
+        } else {
+            /* Handle timer here */
+            parse_acpi_to_struct();
+            printf("%s: %s - %i, %s\n", battery->name, battery->status,
+                    battery->percent, battery->remaining);
+            display(0, 0);
+        }
+        /* Handle XEvents and flush the input */
+        while (XPending(dis)) {
+            XNextEvent(dis, &event);
+        }
     }
 
     free_and_close();
